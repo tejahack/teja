@@ -114,17 +114,22 @@ class LoginWindow:
         password_frame.pack(fill='x', pady=(0, 15))
         
         password_label = tk.Label(password_frame, text="Password:", 
-                                 font=('Arial', 11), 
+                                 font=('Arial', 11, 'bold'), 
                                  bg='#2c3e50', fg='white')
-        password_label.pack(anchor='w')
+        password_label.pack(anchor='w', pady=(0, 5))
+        
+        # Create a container frame for better visibility
+        entry_container = tk.Frame(password_frame, bg='#3498db', relief='solid', bd=1)
+        entry_container.pack(fill='x', pady=(5, 0))
         
         self.password_var = tk.StringVar()
-        self.password_entry = tk.Entry(password_frame, textvariable=self.password_var, 
+        self.password_entry = tk.Entry(entry_container, textvariable=self.password_var, 
                                       show='*', font=('Arial', 12), 
-                                      bg='#34495e', fg='white', 
-                                      insertbackground='white',
-                                      relief='flat', bd=5)
-        self.password_entry.pack(fill='x', pady=(5, 0), ipady=8)
+                                      bg='white', fg='black', 
+                                      insertbackground='black',
+                                      relief='flat', bd=0,
+                                      highlightthickness=0)
+        self.password_entry.pack(fill='x', padx=2, pady=2, ipady=8)
         
         # Bind Enter key to login
         self.password_entry.bind('<Return>', lambda e: self.login())
@@ -351,12 +356,18 @@ class MinimalAppLockManager:
         # Current password
         tk.Label(dialog, text="Current Password:", bg='#2c3e50', fg='white').pack(pady=5)
         current_var = tk.StringVar()
-        tk.Entry(dialog, textvariable=current_var, show='*', bg='#34495e', fg='white').pack(pady=5)
+        current_entry = tk.Entry(dialog, textvariable=current_var, show='*', 
+                                bg='white', fg='black', insertbackground='black',
+                                relief='solid', bd=2)
+        current_entry.pack(pady=5, padx=20, fill='x')
         
         # New password
         tk.Label(dialog, text="New Password:", bg='#2c3e50', fg='white').pack(pady=5)
         new_var = tk.StringVar()
-        tk.Entry(dialog, textvariable=new_var, show='*', bg='#34495e', fg='white').pack(pady=5)
+        new_entry = tk.Entry(dialog, textvariable=new_var, show='*', 
+                            bg='white', fg='black', insertbackground='black',
+                            relief='solid', bd=2)
+        new_entry.pack(pady=5, padx=20, fill='x')
         
         def save_password():
             if not self.verify_password(current_var.get()):

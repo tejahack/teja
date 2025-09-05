@@ -153,17 +153,22 @@ class LoginWindow:
         password_frame.pack(fill='x', pady=(0, 15))
         
         password_label = tk.Label(password_frame, text="Password:", 
-                                 font=('Arial', 11), 
+                                 font=('Arial', 11, 'bold'), 
                                  bg='#2c3e50', fg='white')
-        password_label.pack(anchor='w')
+        password_label.pack(anchor='w', pady=(0, 5))
+        
+        # Create a container frame for better visibility
+        entry_container = tk.Frame(password_frame, bg='#3498db', relief='solid', bd=1)
+        entry_container.pack(fill='x', pady=(5, 0))
         
         self.password_var = tk.StringVar()
-        self.password_entry = tk.Entry(password_frame, textvariable=self.password_var, 
+        self.password_entry = tk.Entry(entry_container, textvariable=self.password_var, 
                                       show='*', font=('Arial', 12), 
-                                      bg='#34495e', fg='white', 
-                                      insertbackground='white',
-                                      relief='flat', bd=5)
-        self.password_entry.pack(fill='x', pady=(5, 0), ipady=8)
+                                      bg='white', fg='black', 
+                                      insertbackground='black',
+                                      relief='flat', bd=0,
+                                      highlightthickness=0)
+        self.password_entry.pack(fill='x', padx=2, pady=2, ipady=8)
         
         # Bind Enter key to login
         self.password_entry.bind('<Return>', lambda e: self.login())
@@ -987,13 +992,23 @@ class AppLockManager:
                 
                 # Authentication form
                 tk.Label(auth_dialog, text="Enter password to show window:", 
-                        font=('Arial', 10), bg='#2c3e50', fg='white').pack(pady=10)
+                        font=('Arial', 10, 'bold'), bg='#2c3e50', fg='white').pack(pady=10)
+                
+                # Create container for password entry
+                entry_frame = tk.Frame(auth_dialog, bg='#2c3e50')
+                entry_frame.pack(fill='x', padx=20, pady=5)
+                
+                entry_container = tk.Frame(entry_frame, bg='#3498db', relief='solid', bd=1)
+                entry_container.pack(fill='x')
                 
                 password_var = tk.StringVar()
-                password_entry = tk.Entry(auth_dialog, textvariable=password_var, 
-                                         show='*', font=('Arial', 10),
-                                         bg='#34495e', fg='white')
-                password_entry.pack(pady=5, padx=20, fill='x')
+                password_entry = tk.Entry(entry_container, textvariable=password_var, 
+                                         show='*', font=('Arial', 11),
+                                         bg='white', fg='black',
+                                         insertbackground='black',
+                                         relief='flat', bd=0,
+                                         highlightthickness=0)
+                password_entry.pack(fill='x', padx=2, pady=2, ipady=6)
                 
                 def authenticate():
                     try:
