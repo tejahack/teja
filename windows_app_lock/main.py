@@ -309,6 +309,12 @@ class AppLockManager:
         self.monitor_thread = None
         self.tray_icon = None
         
+        # Temporary access management
+        self.temporary_access = {}  # {exe_path: expiry_time}
+        self.temp_access_duration = 300  # 5 minutes default
+        self.access_attempts = {}  # Track failed attempts per app
+        self.access_log = []  # Log of access attempts and grants
+        
         # Default password hash (password: "admin123")
         self.password_hash = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
         
@@ -583,6 +589,28 @@ class AppLockManager:
         ttk.Checkbutton(monitoring_frame, text="Show notifications when blocking apps", 
                        variable=self.show_notifications).pack(anchor='w', padx=10, pady=5)
         
+        # Temporary Access settings
+        access_frame = ttk.LabelFrame(self.settings_frame, text="Temporary Access Settings")
+        access_frame.pack(fill='x', padx=20, pady=10)
+        
+        # Access duration
+        duration_frame = ttk.Frame(access_frame)
+        duration_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Label(duration_frame, text="Temporary access duration (minutes):").pack(side='left')
+        self.temp_access_var = tk.StringVar(value=str(self.temp_access_duration // 60))
+        duration_spinbox = ttk.Spinbox(duration_frame, from_=1, to=60, width=5, 
+                                      textvariable=self.temp_access_var)
+        duration_spinbox.pack(side='left', padx=5)
+        
+        # Show current temporary access
+        ttk.Button(access_frame, text="View Active Temporary Access", 
+                  command=self.show_temporary_access).pack(anchor='w', padx=10, pady=5)
+        
+        # Show access log
+        ttk.Button(access_frame, text="View Access Attempt Log", 
+                  command=self.show_access_log).pack(anchor='w', padx=10, pady=5)
+        
         # Control buttons
         control_frame = ttk.Frame(self.settings_frame)
         control_frame.pack(fill='x', padx=20, pady=20)
@@ -815,8 +843,224 @@ class AppLockManager:
     
     def save_settings(self):
         """Save application settings"""
+        try:
+            # Update temporary access duration
+            duration_minutes = int(self.temp_access_var.get())
+            self.temp_access_duration = duration_minutes * 60
+        except ValueError:
+            messagebox.showerror("Error", "Invalid temporary access duration")
+            return
+        
         self.save_config()
         messagebox.showinfo("Success", "Settings saved successfully")
+    
+    def show_temporary_access(self):
+        """Show currently active temporary access"""
+        if not self.temporary_access:
+            messagebox.showinfo("Temporary Access", "No applications currently have temporary access.")
+            return
+        
+        # Create dialog to show active access
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Active Temporary Access")
+        dialog.geometry("500x300")
+        dialog.configure(bg='#2c3e50')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (250)
+        y = (dialog.winfo_screenheight() // 2) - (150)
+        dialog.geometry(f'500x300+{x}+{y}')
+        
+        # Header
+        header = tk.Label(dialog, text="Applications with Temporary Access", 
+                         font=('Arial', 14, 'bold'), 
+                         bg='#2c3e50', fg='white')
+        header.pack(pady=10)
+        
+        # List frame
+        list_frame = tk.Frame(dialog, bg='#2c3e50')
+        list_frame.pack(expand=True, fill='both', padx=20, pady=10)
+        
+        # Create treeview for access list
+        columns = ('Application', 'Expires At', 'Time Remaining')
+        access_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=8)
+        
+        for col in columns:
+            access_tree.heading(col, text=col)
+            access_tree.column(col, width=150)
+        
+        # Populate with current access
+        now = datetime.now()
+        for exe_path, expiry_time in self.temporary_access.items():
+            # Find app name
+            app_name = "Unknown"
+            for path, config in self.blocked_apps.items():
+                if path == exe_path:
+                    app_name = config['name']
+                    break
+            
+            remaining = expiry_time - now
+            remaining_str = f"{int(remaining.total_seconds() // 60)}m {int(remaining.total_seconds() % 60)}s"
+            
+            access_tree.insert('', 'end', values=(
+                app_name,
+                expiry_time.strftime('%H:%M:%S'),
+                remaining_str
+            ))
+        
+        access_tree.pack(expand=True, fill='both')
+        
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg='#2c3e50')
+        btn_frame.pack(fill='x', padx=20, pady=10)
+        
+        def revoke_selected():
+            selection = access_tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select an application to revoke access.")
+                return
+            
+            item = access_tree.item(selection[0])
+            app_name = item['values'][0]
+            
+            # Find and remove the access
+            for exe_path, expiry_time in list(self.temporary_access.items()):
+                for path, config in self.blocked_apps.items():
+                    if path == exe_path and config['name'] == app_name:
+                        del self.temporary_access[exe_path]
+                        messagebox.showinfo("Success", f"Revoked temporary access for {app_name}")
+                        dialog.destroy()
+                        return
+        
+        def refresh_list():
+            # Clear and repopulate
+            for item in access_tree.get_children():
+                access_tree.delete(item)
+            
+            now = datetime.now()
+            for exe_path, expiry_time in self.temporary_access.items():
+                if now < expiry_time:  # Still valid
+                    app_name = "Unknown"
+                    for path, config in self.blocked_apps.items():
+                        if path == exe_path:
+                            app_name = config['name']
+                            break
+                    
+                    remaining = expiry_time - now
+                    remaining_str = f"{int(remaining.total_seconds() // 60)}m {int(remaining.total_seconds() % 60)}s"
+                    
+                    access_tree.insert('', 'end', values=(
+                        app_name,
+                        expiry_time.strftime('%H:%M:%S'),
+                        remaining_str
+                    ))
+        
+        ttk.Button(btn_frame, text="Revoke Selected", command=revoke_selected).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Refresh", command=refresh_list).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Close", command=dialog.destroy).pack(side='right', padx=5)
+    
+    def log_access_attempt(self, app_config, success, details):
+        """Log access attempts for security tracking"""
+        log_entry = {
+            'timestamp': datetime.now(),
+            'app_name': app_config.get('name', 'Unknown'),
+            'app_path': app_config.get('path', 'Unknown'),
+            'success': success,
+            'details': details
+        }
+        
+        self.access_log.append(log_entry)
+        
+        # Keep only last 100 entries to prevent memory issues
+        if len(self.access_log) > 100:
+            self.access_log = self.access_log[-100:]
+        
+        # Print to console for debugging
+        status = "GRANTED" if success else "DENIED"
+        print(f"[{log_entry['timestamp'].strftime('%H:%M:%S')}] ACCESS {status}: {app_config.get('name', 'Unknown')} - {details}")
+    
+    def show_access_log(self):
+        """Show access attempt log"""
+        if not self.access_log:
+            messagebox.showinfo("Access Log", "No access attempts have been logged yet.")
+            return
+        
+        # Create log dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Access Attempt Log")
+        dialog.geometry("700x400")
+        dialog.configure(bg='#2c3e50')
+        dialog.transient(self.root)
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (350)
+        y = (dialog.winfo_screenheight() // 2) - (200)
+        dialog.geometry(f'700x400+{x}+{y}')
+        
+        # Header
+        header = tk.Label(dialog, text="Access Attempt Log", 
+                         font=('Arial', 14, 'bold'), 
+                         bg='#2c3e50', fg='white')
+        header.pack(pady=10)
+        
+        # Log frame
+        log_frame = tk.Frame(dialog, bg='#2c3e50')
+        log_frame.pack(expand=True, fill='both', padx=20, pady=10)
+        
+        # Create treeview for log
+        columns = ('Time', 'Application', 'Status', 'Details')
+        log_tree = ttk.Treeview(log_frame, columns=columns, show='headings', height=12)
+        
+        # Configure columns
+        log_tree.column('Time', width=100)
+        log_tree.column('Application', width=200)
+        log_tree.column('Status', width=80)
+        log_tree.column('Details', width=300)
+        
+        for col in columns:
+            log_tree.heading(col, text=col)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(log_frame, orient='vertical', command=log_tree.yview)
+        log_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Populate log (most recent first)
+        for entry in reversed(self.access_log):
+            status = "GRANTED" if entry['success'] else "DENIED"
+            status_color = "green" if entry['success'] else "red"
+            
+            item = log_tree.insert('', 'end', values=(
+                entry['timestamp'].strftime('%H:%M:%S'),
+                entry['app_name'],
+                status,
+                entry['details']
+            ))
+            
+            # Color code the status
+            if not entry['success']:
+                log_tree.set(item, 'Status', '❌ DENIED')
+            else:
+                log_tree.set(item, 'Status', '✅ GRANTED')
+        
+        log_tree.pack(side='left', expand=True, fill='both')
+        scrollbar.pack(side='right', fill='y')
+        
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg='#2c3e50')
+        btn_frame.pack(fill='x', padx=20, pady=10)
+        
+        def clear_log():
+            if messagebox.askyesno("Confirm", "Are you sure you want to clear the access log?"):
+                self.access_log.clear()
+                messagebox.showinfo("Success", "Access log cleared")
+                dialog.destroy()
+        
+        ttk.Button(btn_frame, text="Clear Log", command=clear_log).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text="Close", command=dialog.destroy).pack(side='right', padx=5)
     
     def export_config(self):
         """Export configuration to file"""
@@ -890,13 +1134,42 @@ class AppLockManager:
                                 should_block = should_block and self.is_time_restricted(app_config)
                             
                             if should_block:
-                                proc.terminate()
-                                if self.show_notifications.get():
-                                    self.show_notification(f"Blocked application: {app_config['name']}")
-                                print(f"Blocked: {app_config['name']}")
+                                # Check if this app has temporary access
+                                if self.has_temporary_access(exe_path):
+                                    continue  # Allow to run
+                                
+                                # Pause the process first (don't terminate immediately)
+                                try:
+                                    proc.suspend()
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    continue
+                                
+                                # Show password prompt for access
+                                if self.prompt_for_app_access(app_config, proc):
+                                    # Password correct, grant temporary access
+                                    self.grant_temporary_access(exe_path)
+                                    try:
+                                        proc.resume()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                                    print(f"Temporary access granted: {app_config['name']}")
+                                    if hasattr(self, 'show_notifications') and self.show_notifications.get():
+                                        self.show_notification(f"Temporary access granted: {app_config['name']}")
+                                else:
+                                    # Password incorrect or cancelled, terminate
+                                    try:
+                                        proc.terminate()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                                    print(f"Blocked: {app_config['name']}")
+                                    if hasattr(self, 'show_notifications') and self.show_notifications.get():
+                                        self.show_notification(f"Blocked application: {app_config['name']}")
                     
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
+                
+                # Clean up expired temporary access
+                self.cleanup_expired_access()
                 
                 time.sleep(2)  # Check every 2 seconds
                 
@@ -916,6 +1189,233 @@ class AppLockManager:
         """Stop process monitoring"""
         self.monitoring = False
         self.status_var.set("Ready - Monitoring: Stopped")
+    
+    def has_temporary_access(self, exe_path):
+        """Check if app has temporary access"""
+        if exe_path not in self.temporary_access:
+            return False
+        
+        expiry_time = self.temporary_access[exe_path]
+        if datetime.now() > expiry_time:
+            # Access expired, remove it
+            del self.temporary_access[exe_path]
+            return False
+        
+        return True
+    
+    def grant_temporary_access(self, exe_path, duration_minutes=None):
+        """Grant temporary access to an application"""
+        if duration_minutes is None:
+            duration_minutes = self.temp_access_duration // 60
+        
+        expiry_time = datetime.now() + timedelta(minutes=duration_minutes)
+        self.temporary_access[exe_path] = expiry_time
+        
+        print(f"Temporary access granted until {expiry_time.strftime('%H:%M:%S')}")
+    
+    def cleanup_expired_access(self):
+        """Remove expired temporary access entries"""
+        now = datetime.now()
+        expired_paths = [path for path, expiry in self.temporary_access.items() if now > expiry]
+        
+        for path in expired_paths:
+            del self.temporary_access[path]
+            print(f"Temporary access expired for {path}")
+    
+    def prompt_for_app_access(self, app_config, process):
+        """Show password prompt for blocked app access"""
+        try:
+            # Store the request for the main thread to handle
+            request_id = f"{app_config['name']}_{datetime.now().timestamp()}"
+            self.pending_access_requests = getattr(self, 'pending_access_requests', {})
+            self.pending_access_requests[request_id] = {
+                'app_config': app_config,
+                'process': process,
+                'result': None,
+                'timestamp': datetime.now()
+            }
+            
+            # Schedule dialog to run in main thread
+            self.root.after(0, lambda: self.handle_access_request(request_id))
+            
+            # Wait for result with timeout
+            timeout_count = 0
+            while (request_id in self.pending_access_requests and 
+                   self.pending_access_requests[request_id]['result'] is None and 
+                   timeout_count < 150):  # 15 second timeout
+                time.sleep(0.1)
+                timeout_count += 1
+            
+            if request_id in self.pending_access_requests:
+                result = self.pending_access_requests[request_id]['result']
+                del self.pending_access_requests[request_id]
+                return result if result is not None else False
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error showing access dialog: {e}")
+            return False
+    
+    def handle_access_request(self, request_id):
+        """Handle access request in main thread"""
+        try:
+            if request_id not in getattr(self, 'pending_access_requests', {}):
+                return
+            
+            request = self.pending_access_requests[request_id]
+            app_config = request['app_config']
+            
+            # Show the dialog
+            result = self.show_app_access_dialog(app_config)
+            
+            # Store result
+            if request_id in self.pending_access_requests:
+                self.pending_access_requests[request_id]['result'] = result
+                
+        except Exception as e:
+            print(f"Error handling access request: {e}")
+            if request_id in getattr(self, 'pending_access_requests', {}):
+                self.pending_access_requests[request_id]['result'] = False
+    
+    def show_app_access_dialog(self, app_config):
+        """Show password dialog for app access"""
+        try:
+            # Create modal dialog
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Application Access Request")
+            dialog.geometry("400x250")
+            dialog.configure(bg='#2c3e50')
+            dialog.resizable(False, False)
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # Center the dialog
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (200)
+            y = (dialog.winfo_screenheight() // 2) - (125)
+            dialog.geometry(f'400x250+{x}+{y}')
+            
+            # Result variable
+            dialog_result = {'result': False}
+            
+            # Header
+            header_frame = tk.Frame(dialog, bg='#e74c3c')
+            header_frame.pack(fill='x')
+            
+            tk.Label(header_frame, text="⚠️ BLOCKED APPLICATION", 
+                    font=('Arial', 12, 'bold'), 
+                    bg='#e74c3c', fg='white').pack(pady=10)
+            
+            # Content frame
+            content_frame = tk.Frame(dialog, bg='#2c3e50')
+            content_frame.pack(expand=True, fill='both', padx=20, pady=20)
+            
+            # App info
+            app_info = tk.Label(content_frame, 
+                               text=f"Application: {app_config['name']}\\n\\nThis application is currently blocked.\\nEnter password to grant temporary access (5 minutes):",
+                               font=('Arial', 10), 
+                               bg='#2c3e50', fg='white',
+                               justify='center')
+            app_info.pack(pady=(0, 15))
+            
+            # Password frame
+            password_frame = tk.Frame(content_frame, bg='#2c3e50')
+            password_frame.pack(fill='x', pady=10)
+            
+            tk.Label(password_frame, text="Password:", 
+                    font=('Arial', 10, 'bold'), 
+                    bg='#2c3e50', fg='white').pack(anchor='w')
+            
+            # Password entry with blue border
+            entry_container = tk.Frame(password_frame, bg='#3498db', relief='solid', bd=1)
+            entry_container.pack(fill='x', pady=(5, 0))
+            
+            password_var = tk.StringVar()
+            password_entry = tk.Entry(entry_container, textvariable=password_var, 
+                                     show='*', font=('Arial', 11),
+                                     bg='white', fg='black',
+                                     insertbackground='black',
+                                     relief='flat', bd=0,
+                                     highlightthickness=0)
+            password_entry.pack(fill='x', padx=2, pady=2, ipady=6)
+            
+            # Status label
+            status_var = tk.StringVar()
+            status_label = tk.Label(password_frame, textvariable=status_var,
+                                   font=('Arial', 9),
+                                   bg='#2c3e50', fg='#e74c3c')
+            status_label.pack(pady=(5, 0))
+            
+            # Buttons
+            btn_frame = tk.Frame(content_frame, bg='#2c3e50')
+            btn_frame.pack(fill='x', pady=(15, 0))
+            
+            def grant_access():
+                password = password_var.get()
+                if not password:
+                    status_var.set("Please enter a password")
+                    return
+                
+                if self.verify_password(password):
+                    dialog_result['result'] = True
+                    
+                    # Log successful access
+                    self.log_access_attempt(app_config, True, "Password correct - Access granted")
+                    
+                    dialog.destroy()
+                else:
+                    # Track failed attempts
+                    app_path = app_config.get('path', 'unknown')
+                    self.access_attempts[app_path] = self.access_attempts.get(app_path, 0) + 1
+                    
+                    attempts = self.access_attempts[app_path]
+                    status_var.set(f"Invalid password. Attempt {attempts}/3")
+                    
+                    # Log failed attempt
+                    self.log_access_attempt(app_config, False, f"Invalid password - Attempt {attempts}/3")
+                    
+                    if attempts >= 3:
+                        status_var.set("Too many failed attempts. Access denied.")
+                        self.log_access_attempt(app_config, False, "Too many failed attempts - Access denied")
+                        self.root.after(2000, dialog.destroy)
+                        return
+                    
+                    password_var.set("")
+                    password_entry.focus()
+            
+            def deny_access():
+                dialog_result['result'] = False
+                dialog.destroy()
+            
+            # Buttons
+            tk.Button(btn_frame, text="Grant Access (5 min)", 
+                     command=grant_access,
+                     bg='#27ae60', fg='white', 
+                     font=('Arial', 10, 'bold'),
+                     relief='flat', pady=8).pack(side='left', fill='x', expand=True, padx=(0, 5))
+            
+            tk.Button(btn_frame, text="Deny Access", 
+                     command=deny_access,
+                     bg='#e74c3c', fg='white', 
+                     font=('Arial', 10, 'bold'),
+                     relief='flat', pady=8).pack(side='right', fill='x', expand=True, padx=(5, 0))
+            
+            # Bind Enter key and focus
+            password_entry.bind('<Return>', lambda e: grant_access())
+            password_entry.focus()
+            
+            # Auto-deny after 30 seconds
+            dialog.after(30000, deny_access)
+            
+            # Wait for dialog to close
+            dialog.wait_window()
+            
+            return dialog_result['result']
+            
+        except Exception as e:
+            print(f"Error in access dialog: {e}")
+            return False
     
     def show_notification(self, message):
         """Show system notification"""
