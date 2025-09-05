@@ -3,20 +3,52 @@ Windows App Lock - Main Application
 A comprehensive application to lock/block access to specific Windows applications
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import psutil
+# Import sys first
+import sys
+
+# Import handling with error checking
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, filedialog
+except ImportError:
+    print("Error: tkinter is not available. This application requires tkinter.")
+    print("On Ubuntu/Debian: sudo apt-get install python3-tk")
+    print("On CentOS/RHEL: sudo yum install tkinter")
+    print("On Windows: tkinter should be included with Python")
+    sys.exit(1)
+
+try:
+    import psutil
+except ImportError:
+    print("Error: psutil is not installed. Run: pip install psutil")
+    sys.exit(1)
+
 import subprocess
 import threading
 import time
 import json
 import hashlib
 import os
-import sys
 from datetime import datetime, timedelta
-import pystray
-from PIL import Image, ImageDraw
 from pathlib import Path
+
+# Optional imports with fallbacks
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    TRAY_AVAILABLE = True
+except ImportError:
+    TRAY_AVAILABLE = False
+    print("Warning: System tray functionality not available (pystray/PIL not installed)")
+
+try:
+    if sys.platform == "win32":
+        import win10toast
+        NOTIFICATIONS_AVAILABLE = True
+    else:
+        NOTIFICATIONS_AVAILABLE = False
+except ImportError:
+    NOTIFICATIONS_AVAILABLE = False
 
 class LoginWindow:
     def __init__(self):
@@ -91,8 +123,14 @@ class LoginWindow:
         icon_frame.pack(pady=(0, 15))
         icon_frame.pack_propagate(False)
         
-        icon_label = tk.Label(icon_frame, text="🔒", font=('Arial', 24), 
-                             bg='#e74c3c', fg='white')
+        # Use a simple text icon that works across all systems
+        try:
+            icon_label = tk.Label(icon_frame, text="🔒", font=('Arial', 24), 
+                                 bg='#e74c3c', fg='white')
+        except:
+            # Fallback for systems that don't support emoji
+            icon_label = tk.Label(icon_frame, text="LOCK", font=('Arial', 10, 'bold'), 
+                                 bg='#e74c3c', fg='white')
         icon_label.pack(expand=True)
         
         # Title
@@ -306,14 +344,24 @@ class AppLockManager:
     
     def setup_gui(self):
         """Setup the main GUI"""
-        # Style configuration
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Configure colors
-        style.configure('Title.TLabel', font=('Arial', 16, 'bold'), background='#2c3e50', foreground='white')
-        style.configure('Heading.TLabel', font=('Arial', 12, 'bold'), background='#2c3e50', foreground='white')
-        style.configure('Custom.TFrame', background='#34495e')
+        # Style configuration with error handling
+        try:
+            style = ttk.Style()
+            # Try to use clam theme, fallback to default if not available
+            try:
+                style.theme_use('clam')
+            except tk.TclError:
+                print("Warning: 'clam' theme not available, using default theme")
+            
+            # Configure colors with error handling
+            try:
+                style.configure('Title.TLabel', font=('Arial', 16, 'bold'), background='#2c3e50', foreground='white')
+                style.configure('Heading.TLabel', font=('Arial', 12, 'bold'), background='#2c3e50', foreground='white')
+                style.configure('Custom.TFrame', background='#34495e')
+            except tk.TclError as e:
+                print(f"Warning: Could not configure custom styles: {e}")
+        except Exception as e:
+            print(f"Warning: Style configuration failed: {e}")
         
         # Main title
         title_label = ttk.Label(self.root, text="Windows App Lock Manager", style='Title.TLabel')
@@ -344,8 +392,11 @@ class AppLockManager:
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief='sunken')
         status_bar.pack(side='bottom', fill='x')
         
-        # System tray setup
-        self.setup_system_tray()
+        # System tray setup (only if available)
+        if TRAY_AVAILABLE:
+            self.setup_system_tray()
+        else:
+            print("System tray functionality disabled (dependencies not available)")
         
         # Handle window close event
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -635,47 +686,72 @@ class AppLockManager:
     
     def refresh_processes(self):
         """Refresh the running processes list"""
-        # Clear existing items
-        for item in self.processes_tree.get_children():
-            self.processes_tree.delete(item)
-        
         try:
+            # Clear existing items
+            for item in self.processes_tree.get_children():
+                self.processes_tree.delete(item)
+            
+            # Get processes with error handling
             for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
                 try:
                     info = proc.info
+                    # Handle missing or None values
+                    pid = info.get('pid', 'N/A')
+                    name = info.get('name', 'Unknown')
+                    cpu = info.get('cpu_percent', 0.0)
+                    memory = info.get('memory_percent', 0.0)
+                    status = info.get('status', 'Unknown')
+                    
+                    # Format values safely
+                    cpu_str = f"{cpu:.1f}" if isinstance(cpu, (int, float)) else "0.0"
+                    memory_str = f"{memory:.1f}" if isinstance(memory, (int, float)) else "0.0"
+                    
                     self.processes_tree.insert('', 'end', values=(
-                        info['pid'],
-                        info['name'],
-                        f"{info['cpu_percent']:.1f}",
-                        f"{info['memory_percent']:.1f}",
-                        info['status']
+                        pid, name, cpu_str, memory_str, status
                     ))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                except Exception as e:
+                    print(f"Error processing individual process: {e}")
                     continue
         except Exception as e:
             print(f"Error refreshing processes: {e}")
+            # Show error in status if available
+            if hasattr(self, 'status_var'):
+                self.status_var.set(f"Error refreshing processes: {str(e)[:50]}...")
     
     def filter_processes(self, *args):
         """Filter processes based on search term"""
-        filter_text = self.process_filter_var.get().lower()
-        
-        # Clear and repopulate
-        for item in self.processes_tree.get_children():
-            self.processes_tree.delete(item)
-        
         try:
+            filter_text = self.process_filter_var.get().lower()
+            
+            # Clear and repopulate
+            for item in self.processes_tree.get_children():
+                self.processes_tree.delete(item)
+            
             for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'status']):
                 try:
                     info = proc.info
-                    if filter_text in info['name'].lower():
+                    name = info.get('name', 'Unknown')
+                    
+                    if filter_text in name.lower():
+                        # Handle missing or None values
+                        pid = info.get('pid', 'N/A')
+                        cpu = info.get('cpu_percent', 0.0)
+                        memory = info.get('memory_percent', 0.0)
+                        status = info.get('status', 'Unknown')
+                        
+                        # Format values safely
+                        cpu_str = f"{cpu:.1f}" if isinstance(cpu, (int, float)) else "0.0"
+                        memory_str = f"{memory:.1f}" if isinstance(memory, (int, float)) else "0.0"
+                        
                         self.processes_tree.insert('', 'end', values=(
-                            info['pid'],
-                            info['name'],
-                            f"{info['cpu_percent']:.1f}",
-                            f"{info['memory_percent']:.1f}",
-                            info['status']
+                            pid, name, cpu_str, memory_str, status
                         ))
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+                except Exception as e:
+                    print(f"Error filtering individual process: {e}")
                     continue
         except Exception as e:
             print(f"Error filtering processes: {e}")
@@ -839,24 +915,34 @@ class AppLockManager:
     def show_notification(self, message):
         """Show system notification"""
         try:
-            if sys.platform == "win32":
-                import win10toast
+            if NOTIFICATIONS_AVAILABLE and sys.platform == "win32":
                 toaster = win10toast.ToastNotifier()
                 toaster.show_toast("App Lock", message, duration=3)
-        except ImportError:
-            print(f"Notification: {message}")
+            else:
+                print(f"Notification: {message}")
+        except Exception as e:
+            print(f"Notification: {message} (Toast failed: {e})")
     
     def create_tray_image(self):
         """Create system tray icon"""
-        # Create a simple icon
-        image = Image.new('RGB', (64, 64), color='red')
-        draw = ImageDraw.Draw(image)
-        draw.rectangle([16, 16, 48, 48], fill='white')
-        draw.text((20, 25), "AL", fill='red')
-        return image
+        if not TRAY_AVAILABLE:
+            return None
+        try:
+            # Create a simple icon
+            image = Image.new('RGB', (64, 64), color='red')
+            draw = ImageDraw.Draw(image)
+            draw.rectangle([16, 16, 48, 48], fill='white')
+            draw.text((20, 25), "AL", fill='red')
+            return image
+        except Exception as e:
+            print(f"Failed to create tray image: {e}")
+            return None
     
     def setup_system_tray(self):
         """Setup system tray icon"""
+        if not TRAY_AVAILABLE:
+            return
+            
         try:
             image = self.create_tray_image()
             
@@ -878,59 +964,80 @@ class AppLockManager:
             
         except Exception as e:
             print(f"Failed to setup system tray: {e}")
+            self.tray_icon = None
     
     def show_window(self, icon=None, item=None):
         """Show main window with authentication check"""
-        # Create a simple authentication dialog
-        auth_dialog = tk.Toplevel()
-        auth_dialog.title("Authentication Required")
-        auth_dialog.geometry("300x150")
-        auth_dialog.configure(bg='#2c3e50')
-        auth_dialog.resizable(False, False)
-        auth_dialog.transient(self.root)
-        auth_dialog.grab_set()
-        
-        # Center the dialog
-        auth_dialog.update_idletasks()
-        x = (auth_dialog.winfo_screenwidth() // 2) - (150)
-        y = (auth_dialog.winfo_screenheight() // 2) - (75)
-        auth_dialog.geometry(f'300x150+{x}+{y}')
-        
-        # Authentication form
-        tk.Label(auth_dialog, text="Enter password to show window:", 
-                font=('Arial', 10), bg='#2c3e50', fg='white').pack(pady=10)
-        
-        password_var = tk.StringVar()
-        password_entry = tk.Entry(auth_dialog, textvariable=password_var, 
-                                 show='*', font=('Arial', 10),
-                                 bg='#34495e', fg='white')
-        password_entry.pack(pady=5, padx=20, fill='x')
-        password_entry.focus()
-        
-        def authenticate():
-            if self.verify_password(password_var.get()):
-                auth_dialog.destroy()
+        try:
+            # Check if main window exists and is withdrawn
+            if self.root.state() == 'withdrawn':
+                # Create a simple authentication dialog
+                auth_dialog = tk.Toplevel(self.root)
+                auth_dialog.title("Authentication Required")
+                auth_dialog.geometry("300x150")
+                auth_dialog.configure(bg='#2c3e50')
+                auth_dialog.resizable(False, False)
+                auth_dialog.grab_set()
+                
+                # Center the dialog
+                auth_dialog.update_idletasks()
+                x = (auth_dialog.winfo_screenwidth() // 2) - (150)
+                y = (auth_dialog.winfo_screenheight() // 2) - (75)
+                auth_dialog.geometry(f'300x150+{x}+{y}')
+                
+                # Authentication form
+                tk.Label(auth_dialog, text="Enter password to show window:", 
+                        font=('Arial', 10), bg='#2c3e50', fg='white').pack(pady=10)
+                
+                password_var = tk.StringVar()
+                password_entry = tk.Entry(auth_dialog, textvariable=password_var, 
+                                         show='*', font=('Arial', 10),
+                                         bg='#34495e', fg='white')
+                password_entry.pack(pady=5, padx=20, fill='x')
+                
+                def authenticate():
+                    try:
+                        if self.verify_password(password_var.get()):
+                            auth_dialog.destroy()
+                            self.root.deiconify()
+                            self.root.lift()
+                            self.root.focus_force()
+                        else:
+                            messagebox.showerror("Error", "Invalid password!", parent=auth_dialog)
+                            password_var.set("")
+                            password_entry.focus()
+                    except Exception as e:
+                        print(f"Authentication error: {e}")
+                        auth_dialog.destroy()
+                
+                def cancel():
+                    auth_dialog.destroy()
+                
+                # Buttons
+                btn_frame = tk.Frame(auth_dialog, bg='#2c3e50')
+                btn_frame.pack(pady=10)
+                
+                tk.Button(btn_frame, text="OK", command=authenticate,
+                         bg='#27ae60', fg='white', relief='flat').pack(side='left', padx=5)
+                tk.Button(btn_frame, text="Cancel", command=cancel,
+                         bg='#e74c3c', fg='white', relief='flat').pack(side='left', padx=5)
+                
+                # Bind Enter key and focus
+                password_entry.bind('<Return>', lambda e: authenticate())
+                password_entry.focus_set()
+            else:
+                # Window is already visible, just bring it to front
                 self.root.deiconify()
                 self.root.lift()
-            else:
-                tk.messagebox.showerror("Error", "Invalid password!", parent=auth_dialog)
-                password_var.set("")
-                password_entry.focus()
-        
-        def cancel():
-            auth_dialog.destroy()
-        
-        # Buttons
-        btn_frame = tk.Frame(auth_dialog, bg='#2c3e50')
-        btn_frame.pack(pady=10)
-        
-        tk.Button(btn_frame, text="OK", command=authenticate,
-                 bg='#27ae60', fg='white', relief='flat').pack(side='left', padx=5)
-        tk.Button(btn_frame, text="Cancel", command=cancel,
-                 bg='#e74c3c', fg='white', relief='flat').pack(side='left', padx=5)
-        
-        # Bind Enter key
-        password_entry.bind('<Return>', lambda e: authenticate())
+                self.root.focus_force()
+        except Exception as e:
+            print(f"Error showing window: {e}")
+            # Fallback: just show the window without authentication
+            try:
+                self.root.deiconify()
+                self.root.lift()
+            except:
+                pass
     
     def hide_window(self, icon=None, item=None):
         """Hide main window"""
@@ -938,18 +1045,33 @@ class AppLockManager:
     
     def on_closing(self):
         """Handle window close event"""
-        if self.minimize_to_tray.get():
-            self.hide_window()
-        else:
+        try:
+            if hasattr(self, 'minimize_to_tray') and self.minimize_to_tray.get() and TRAY_AVAILABLE:
+                self.hide_window()
+            else:
+                self.quit_app()
+        except Exception as e:
+            print(f"Error in on_closing: {e}")
             self.quit_app()
     
     def quit_app(self, icon=None, item=None):
         """Quit the application"""
-        self.monitoring = False
-        if self.tray_icon:
-            self.tray_icon.stop()
-        self.root.quit()
-        self.root.destroy()
+        try:
+            self.monitoring = False
+            if hasattr(self, 'tray_icon') and self.tray_icon:
+                try:
+                    self.tray_icon.stop()
+                except:
+                    pass
+            self.root.quit()
+            self.root.destroy()
+        except Exception as e:
+            print(f"Error during quit: {e}")
+            try:
+                self.root.destroy()
+            except:
+                pass
+            sys.exit(0)
     
     def run(self):
         """Run the application"""
