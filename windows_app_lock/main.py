@@ -18,6 +18,240 @@ import pystray
 from PIL import Image, ImageDraw
 from pathlib import Path
 
+class LoginWindow:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Windows App Lock - Login")
+        self.root.geometry("400x300")
+        self.root.configure(bg='#2c3e50')
+        self.root.resizable(False, False)
+        
+        # Center the window
+        self.center_window()
+        
+        # Default password hash (password: "admin123")
+        self.password_hash = "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9"
+        self.load_password()
+        
+        # Security features
+        self.authenticated = False
+        self.login_attempts = 0
+        self.max_attempts = 3
+        self.lockout_time = 30  # seconds
+        self.locked_until = None
+        
+        self.setup_login_gui()
+        
+        # Handle window close event
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Focus on password entry
+        self.root.after(100, lambda: self.password_entry.focus())
+    
+    def center_window(self):
+        """Center the login window on screen"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
+    
+    def load_password(self):
+        """Load password hash from config file"""
+        config_file = Path("app_lock_config.json")
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    self.password_hash = config.get('password_hash', self.password_hash)
+            except Exception as e:
+                print(f"Error loading password: {e}")
+    
+    def hash_password(self, password):
+        """Hash password using SHA-256"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def verify_password(self, password):
+        """Verify password against stored hash"""
+        return self.hash_password(password) == self.password_hash
+    
+    def setup_login_gui(self):
+        """Setup the login GUI"""
+        # Main frame
+        main_frame = tk.Frame(self.root, bg='#2c3e50')
+        main_frame.pack(expand=True, fill='both', padx=40, pady=40)
+        
+        # Logo/Title section
+        title_frame = tk.Frame(main_frame, bg='#2c3e50')
+        title_frame.pack(pady=(0, 30))
+        
+        # App icon (using text as placeholder)
+        icon_frame = tk.Frame(title_frame, bg='#e74c3c', width=60, height=60)
+        icon_frame.pack(pady=(0, 15))
+        icon_frame.pack_propagate(False)
+        
+        icon_label = tk.Label(icon_frame, text="🔒", font=('Arial', 24), 
+                             bg='#e74c3c', fg='white')
+        icon_label.pack(expand=True)
+        
+        # Title
+        title_label = tk.Label(title_frame, text="Windows App Lock", 
+                              font=('Arial', 18, 'bold'), 
+                              bg='#2c3e50', fg='white')
+        title_label.pack()
+        
+        subtitle_label = tk.Label(title_frame, text="Enter password to continue", 
+                                 font=('Arial', 10), 
+                                 bg='#2c3e50', fg='#bdc3c7')
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Login form
+        form_frame = tk.Frame(main_frame, bg='#2c3e50')
+        form_frame.pack(fill='x', pady=(0, 20))
+        
+        # Password field
+        password_frame = tk.Frame(form_frame, bg='#2c3e50')
+        password_frame.pack(fill='x', pady=(0, 15))
+        
+        password_label = tk.Label(password_frame, text="Password:", 
+                                 font=('Arial', 11), 
+                                 bg='#2c3e50', fg='white')
+        password_label.pack(anchor='w')
+        
+        self.password_var = tk.StringVar()
+        self.password_entry = tk.Entry(password_frame, textvariable=self.password_var, 
+                                      show='*', font=('Arial', 12), 
+                                      bg='#34495e', fg='white', 
+                                      insertbackground='white',
+                                      relief='flat', bd=5)
+        self.password_entry.pack(fill='x', pady=(5, 0), ipady=8)
+        
+        # Bind Enter key to login
+        self.password_entry.bind('<Return>', lambda e: self.login())
+        
+        # Show/Hide password checkbox
+        self.show_password = tk.BooleanVar()
+        show_cb = tk.Checkbutton(password_frame, text="Show password", 
+                                variable=self.show_password,
+                                command=self.toggle_password_visibility,
+                                bg='#2c3e50', fg='#bdc3c7', 
+                                selectcolor='#34495e',
+                                activebackground='#2c3e50',
+                                activeforeground='white')
+        show_cb.pack(anchor='w', pady=(5, 0))
+        
+        # Login button
+        login_btn = tk.Button(form_frame, text="Login", 
+                             command=self.login,
+                             font=('Arial', 12, 'bold'),
+                             bg='#27ae60', fg='white',
+                             relief='flat', bd=0,
+                             cursor='hand2',
+                             pady=10)
+        login_btn.pack(fill='x', pady=(10, 0))
+        
+        # Status label
+        self.status_var = tk.StringVar()
+        self.status_label = tk.Label(form_frame, textvariable=self.status_var,
+                                    font=('Arial', 9),
+                                    bg='#2c3e50', fg='#e74c3c')
+        self.status_label.pack(pady=(10, 0))
+        
+        # Footer
+        footer_frame = tk.Frame(main_frame, bg='#2c3e50')
+        footer_frame.pack(side='bottom', fill='x')
+        
+        footer_label = tk.Label(footer_frame, 
+                               text="Default password: admin123\nChange password in Settings after login",
+                               font=('Arial', 8),
+                               bg='#2c3e50', fg='#7f8c8d',
+                               justify='center')
+        footer_label.pack()
+    
+    def toggle_password_visibility(self):
+        """Toggle password visibility"""
+        if self.show_password.get():
+            self.password_entry.config(show='')
+        else:
+            self.password_entry.config(show='*')
+    
+    def is_locked_out(self):
+        """Check if currently locked out"""
+        if self.locked_until and datetime.now() < self.locked_until:
+            return True
+        elif self.locked_until and datetime.now() >= self.locked_until:
+            # Lockout period expired, reset
+            self.locked_until = None
+            self.login_attempts = 0
+        return False
+    
+    def login(self):
+        """Handle login attempt"""
+        # Check if locked out
+        if self.is_locked_out():
+            remaining = int((self.locked_until - datetime.now()).total_seconds())
+            self.status_var.set(f"Too many failed attempts. Try again in {remaining}s")
+            return
+        
+        password = self.password_var.get()
+        
+        if not password:
+            self.status_var.set("Please enter a password")
+            return
+        
+        if self.verify_password(password):
+            self.authenticated = True
+            self.status_var.set("Login successful!")
+            self.login_attempts = 0  # Reset attempts on success
+            self.root.after(500, self.close_login)  # Close after brief delay
+        else:
+            self.login_attempts += 1
+            remaining_attempts = self.max_attempts - self.login_attempts
+            
+            if self.login_attempts >= self.max_attempts:
+                # Lock out for specified time
+                self.locked_until = datetime.now() + timedelta(seconds=self.lockout_time)
+                self.status_var.set(f"Too many failed attempts. Locked for {self.lockout_time}s")
+                # Disable login controls temporarily
+                self.password_entry.config(state='disabled')
+                self.root.after(1000, self.update_lockout_status)
+            else:
+                self.status_var.set(f"Invalid password. {remaining_attempts} attempts remaining.")
+            
+            self.password_var.set("")  # Clear password field
+            if self.login_attempts < self.max_attempts:
+                self.password_entry.focus()
+    
+    def update_lockout_status(self):
+        """Update lockout status display"""
+        if self.is_locked_out():
+            remaining = int((self.locked_until - datetime.now()).total_seconds())
+            if remaining > 0:
+                self.status_var.set(f"Locked out. Try again in {remaining}s")
+                self.root.after(1000, self.update_lockout_status)
+            else:
+                self.status_var.set("Lockout expired. You may try again.")
+                self.password_entry.config(state='normal')
+                self.password_entry.focus()
+        else:
+            self.password_entry.config(state='normal')
+            self.password_entry.focus()
+    
+    def close_login(self):
+        """Close login window"""
+        self.root.destroy()
+    
+    def on_closing(self):
+        """Handle window close event"""
+        self.root.destroy()
+        sys.exit(0)  # Exit if login window is closed
+    
+    def run(self):
+        """Run the login window"""
+        self.root.mainloop()
+        return self.authenticated
+
 class AppLockManager:
     def __init__(self):
         self.root = tk.Tk()
@@ -646,9 +880,57 @@ class AppLockManager:
             print(f"Failed to setup system tray: {e}")
     
     def show_window(self, icon=None, item=None):
-        """Show main window"""
-        self.root.deiconify()
-        self.root.lift()
+        """Show main window with authentication check"""
+        # Create a simple authentication dialog
+        auth_dialog = tk.Toplevel()
+        auth_dialog.title("Authentication Required")
+        auth_dialog.geometry("300x150")
+        auth_dialog.configure(bg='#2c3e50')
+        auth_dialog.resizable(False, False)
+        auth_dialog.transient(self.root)
+        auth_dialog.grab_set()
+        
+        # Center the dialog
+        auth_dialog.update_idletasks()
+        x = (auth_dialog.winfo_screenwidth() // 2) - (150)
+        y = (auth_dialog.winfo_screenheight() // 2) - (75)
+        auth_dialog.geometry(f'300x150+{x}+{y}')
+        
+        # Authentication form
+        tk.Label(auth_dialog, text="Enter password to show window:", 
+                font=('Arial', 10), bg='#2c3e50', fg='white').pack(pady=10)
+        
+        password_var = tk.StringVar()
+        password_entry = tk.Entry(auth_dialog, textvariable=password_var, 
+                                 show='*', font=('Arial', 10),
+                                 bg='#34495e', fg='white')
+        password_entry.pack(pady=5, padx=20, fill='x')
+        password_entry.focus()
+        
+        def authenticate():
+            if self.verify_password(password_var.get()):
+                auth_dialog.destroy()
+                self.root.deiconify()
+                self.root.lift()
+            else:
+                tk.messagebox.showerror("Error", "Invalid password!", parent=auth_dialog)
+                password_var.set("")
+                password_entry.focus()
+        
+        def cancel():
+            auth_dialog.destroy()
+        
+        # Buttons
+        btn_frame = tk.Frame(auth_dialog, bg='#2c3e50')
+        btn_frame.pack(pady=10)
+        
+        tk.Button(btn_frame, text="OK", command=authenticate,
+                 bg='#27ae60', fg='white', relief='flat').pack(side='left', padx=5)
+        tk.Button(btn_frame, text="Cancel", command=cancel,
+                 bg='#e74c3c', fg='white', relief='flat').pack(side='left', padx=5)
+        
+        # Bind Enter key
+        password_entry.bind('<Return>', lambda e: authenticate())
     
     def hide_window(self, icon=None, item=None):
         """Hide main window"""
@@ -684,8 +966,18 @@ def main():
     except:
         pass
     
-    app = AppLockManager()
-    app.run()
+    # Show login window first
+    login_window = LoginWindow()
+    authenticated = login_window.run()
+    
+    # Only proceed if authentication was successful
+    if authenticated:
+        print("Authentication successful. Starting main application...")
+        app = AppLockManager()
+        app.run()
+    else:
+        print("Authentication failed or cancelled. Exiting.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

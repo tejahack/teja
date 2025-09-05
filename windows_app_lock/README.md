@@ -15,9 +15,11 @@ A comprehensive Windows application that allows you to block/lock access to spec
 - Supports time ranges that cross midnight
 
 ### 🔐 Security Features
-- Password protection for application settings
-- Secure password hashing using SHA-256
-- Prevent unauthorized changes to blocked applications list
+- **Login Authentication**: Password required to start the application
+- **System Tray Protection**: Password required to show window from system tray
+- **Failed Attempt Protection**: Temporary lockout after 3 failed login attempts (30 seconds)
+- **Secure Password Storage**: SHA-256 password hashing
+- **Settings Protection**: Prevent unauthorized changes to blocked applications list
 
 ### 🖥️ User Interface
 - Modern, intuitive GUI built with tkinter
@@ -74,10 +76,16 @@ For optimal functionality, especially when blocking system applications, run the
 ### First Time Setup
 
 1. **Launch the application**
-   - The default password is: `admin123`
-   - Change this immediately in the Settings tab
+   - You'll be prompted with a login screen
+   - Enter the default password: `admin123`
+   - **IMPORTANT**: Change this password immediately in the Settings tab after login
 
-2. **Add Applications to Block**
+2. **Login Security Features**
+   - Maximum 3 login attempts before 30-second lockout
+   - Password is required every time you start the application
+   - System tray access also requires password authentication
+
+3. **Add Applications to Block**
    - Go to the "Blocked Applications" tab
    - Click "Browse" to select an application executable (.exe file)
    - Enter a display name for the application
@@ -177,15 +185,24 @@ Right-click the tray icon to access these options.
 ## Security Considerations
 
 ### Important Notes
-- This application can terminate any running process
-- Use administrator privileges responsibly
-- Keep your password secure and change it regularly
-- Be cautious when importing configuration files from untrusted sources
+- **Password Protection**: The application requires authentication on every startup
+- **System Tray Security**: Accessing the app from system tray also requires password
+- **Failed Attempt Protection**: After 3 failed login attempts, the app locks for 30 seconds
+- **Process Termination**: This application can terminate any running process
+- **Administrator Privileges**: Use administrator privileges responsibly
+- **Password Security**: Keep your password secure and change it regularly
+- **Configuration Security**: Be cautious when importing configuration files from untrusted sources
+
+### Security Features
+- **SHA-256 Password Hashing**: Passwords are securely hashed and never stored in plain text
+- **Login Attempt Monitoring**: Failed attempts are tracked and cause temporary lockouts
+- **Session Protection**: No persistent login sessions - authentication required each time
 
 ### Limitations
 - Cannot block applications that restart automatically
 - Some system-critical processes may not be terminable
 - Antivirus software may flag process termination activities
+- Login lockout can be bypassed by restarting the application (by design for recovery)
 
 ## File Structure
 
